@@ -38,23 +38,35 @@ public abstract class BaseDiffAdapter<T extends BaseDiffBean, V extends Recycler
     public BaseDiffAdapter(Activity activity, Class<T> tClass) {
         this.activity = activity;
         this.tClass = tClass;
-        setHasStableIds(true);
     }
 
+    /**
+     * 正常数据绑定
+     *
+     * @param holder
+     * @param position
+     */
     public abstract void bindViewAndData(V holder, int position);
 
+    /**
+     * 局部数据绑定
+     *
+     * @param holder
+     * @param position
+     * @param newBean
+     */
     public abstract void partBindViewAndData(V holder, int position, T newBean);
 
     @Override
     public abstract V onCreateViewHolder(ViewGroup parent, int viewType);
 
     @Override
-    public void onBindViewHolder(V holder, int position) {
+    public final void onBindViewHolder(V holder, int position) {
         bindViewAndData(holder, position);
     }
 
     @Override
-    public void onBindViewHolder(@NonNull V holder, int position, @NonNull List<Object> payloads) {
+    public final void onBindViewHolder(@NonNull V holder, int position, @NonNull List<Object> payloads) {
         if (payloads.isEmpty()) {
             onBindViewHolder(holder, position);
         } else {
@@ -65,11 +77,6 @@ public abstract class BaseDiffAdapter<T extends BaseDiffBean, V extends Recycler
     @Override
     public int getItemCount() {
         return data.size();
-    }
-
-    @Override
-    public long getItemId(int position) {
-        return position;
     }
 
     public void setData(List<T> outData) {
@@ -250,7 +257,7 @@ public abstract class BaseDiffAdapter<T extends BaseDiffBean, V extends Recycler
      * @return
      */
     public int onViewHolderItemClick(RecyclerView.ViewHolder holder) {
-        int position = holder.getAdapterPosition();
+        int position = holder.getLayoutPosition();
         if (position >= 0 && position < getData().size()) {
             if (getOnItemClickListener() != null) {
                 getOnItemClickListener().onItemClick(position, getItemData(position));
