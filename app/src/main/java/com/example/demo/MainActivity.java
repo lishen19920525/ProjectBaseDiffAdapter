@@ -3,6 +3,7 @@ package com.example.demo;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 import android.support.v4.widget.SwipeRefreshLayout;
 import android.support.v7.app.AppCompatActivity;
@@ -54,6 +55,24 @@ public class MainActivity extends AppCompatActivity {
         Toast t = Toast.makeText(this, "下拉刷新RecyclerView进行随机Item局部刷新", Toast.LENGTH_LONG);
         t.setGravity(Gravity.CENTER, 0, 0);
         t.show();
+
+        PermissionHandler.get().request(this, PermissionHandler.Type.STORAGE, new PermissionHandler.Callback() {
+            @Override
+            public void onResult(boolean grant) {
+                PermissionHandler.get().request(MainActivity.this, PermissionHandler.Type.LOCATION, new PermissionHandler.Callback() {
+                    @Override
+                    public void onResult(boolean grant) {
+
+                    }
+                });
+            }
+        });
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        PermissionHandler.get().onRequestPermissionsResult(this, requestCode, permissions, grantResults);
     }
 
     private void initData() {

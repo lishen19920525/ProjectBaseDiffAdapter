@@ -2,9 +2,13 @@
 
 buildscript {
     repositories {
-        google()
-        jcenter()
-        
+        jcenter() {
+            url 'https://maven.aliyun.com/repository/jcenter'
+        }
+        maven {
+            url 'https://maven.aliyun.com/repository/google'
+            name 'Google'
+        }
     }
     dependencies {
         classpath 'com.android.tools.build:gradle:3.3.0'
@@ -16,9 +20,13 @@ buildscript {
 
 allprojects {
     repositories {
-        google()
-        jcenter()
-        
+        jcenter() {
+            url 'https://maven.aliyun.com/repository/jcenter'
+        }
+        maven {
+            url 'https://maven.aliyun.com/repository/google'
+            name 'Google'
+        }
     }
 }
 

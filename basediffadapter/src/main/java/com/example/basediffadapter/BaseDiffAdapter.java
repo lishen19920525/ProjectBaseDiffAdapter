@@ -1,9 +1,8 @@
 package com.example.basediffadapter;
 
 import android.app.Activity;
-import android.os.Handler;
-import android.os.Looper;
 import android.support.annotation.LayoutRes;
+import android.support.annotation.MainThread;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 import android.support.v7.util.DiffUtil;
@@ -13,6 +12,14 @@ import android.view.ViewGroup;
 
 import java.util.ArrayList;
 import java.util.List;
+
+import io.reactivex.Observable;
+import io.reactivex.ObservableEmitter;
+import io.reactivex.ObservableOnSubscribe;
+import io.reactivex.Observer;
+import io.reactivex.android.schedulers.AndroidSchedulers;
+import io.reactivex.disposables.Disposable;
+import io.reactivex.schedulers.Schedulers;
 
 
 /**
@@ -27,13 +34,12 @@ public abstract class BaseDiffAdapter<T extends BaseDiffBean, V extends Recycler
     private Activity activity;
     private Class<T> tClass;
 
-    private Handler mainHandler = new Handler(Looper.getMainLooper());
-
-    private List<T> oldData = new ArrayList<>();// 用于新旧对比的旧数据
-    private List<T> data = new ArrayList<>();// 当前数据
+    private ArrayList<T> oldData = new ArrayList<>();// 用于新旧对比的旧数据
+    private ArrayList<T> data = new ArrayList<>();// 当前数据
 
     private OnItemClickListener<T> onItemClickListener;
-    private boolean canNotRefresh = false;
+
+    private final Object LOCK = new Object();
 
     public BaseDiffAdapter(Activity activity, Class<T> tClass) {
         this.activity = activity;
@@ -53,9 +59,9 @@ public abstract class BaseDiffAdapter<T extends BaseDiffBean, V extends Recycler
      *
      * @param holder
      * @param position
-     * @param newBean
+     * @param newData
      */
-    public abstract void partBindViewAndData(V holder, int position, T newBean);
+    public abstract void partBindViewAndData(V holder, int position, T newData);
 
     @Override
     public abstract V onCreateViewHolder(ViewGroup parent, int viewType);
@@ -89,52 +95,57 @@ public abstract class BaseDiffAdapter<T extends BaseDiffBean, V extends Recycler
      * @param outData
      * @param callback
      */
-    public void setData(List<T> outData, final OnSetDataFinishCallback callback) {
-        if (canNotRefresh) {
-            return;
-        }
-        canNotRefresh = true;
-
-        data.clear();
-        if (outData != null) {
-            data.addAll(outData);
-        }
-
-        WorkThreadHelper.get().execute(new Runnable() {
-            @Override
-            public void run() {
-                // 子线程计算差异
-                final DiffUtil.DiffResult result = DiffUtil.calculateDiff(
-                        new BaseDiffCallback(
-                                new ArrayList<>(oldData),
-                                new ArrayList<>(data)));
-
-                mainHandler.post(new Runnable() {
+    @MainThread
+    public void setData(final List<T> outData, final OnSetDataFinishCallback callback) {
+        Observable
+                .create(new ObservableOnSubscribe<DiffUtil.DiffResult>() {
                     @Override
-                    public void run() {
-                        // dispatch 到 adapter 进行界面刷新
-                        result.dispatchUpdatesTo(BaseDiffAdapter.this);
+                    public void subscribe(ObservableEmitter<DiffUtil.DiffResult> emitter) throws Exception {
+                        synchronized (LOCK) {
+                            data.clear();
+                            if (outData != null)
+                                data.addAll(outData);
+                            // 子线程计算差异
+                            DiffUtil.DiffResult result = DiffUtil.calculateDiff(
+                                    new BaseDiffCallback(
+                                            new ArrayList<>(oldData),
+                                            new ArrayList<>(data)));
+                            emitter.onNext(result);
+                            // 序列化生成旧list
+                            oldData.clear();
+                            List<T> oldTemp = JSON.parseList(JSON.toJSONString(data), tClass);
+                            if (oldTemp != null)
+                                oldData.addAll(oldTemp);
+                            emitter.onComplete();
+                        }
+                    }
+                })
+                .subscribeOn(Schedulers.io())
+                .observeOn(AndroidSchedulers.mainThread())
+                .subscribe(new Observer<DiffUtil.DiffResult>() {
+                    @Override
+                    public void onSubscribe(Disposable d) {
+
+                    }
+
+                    @Override
+                    public void onNext(DiffUtil.DiffResult diffResult) {
+                        if (diffResult != null)
+                            // dispatch 到 adapter 进行界面刷新
+                            diffResult.dispatchUpdatesTo(BaseDiffAdapter.this);
+                    }
+
+                    @Override
+                    public void onError(Throwable e) {
+
+                    }
+
+                    @Override
+                    public void onComplete() {
+                        if (callback != null)
+                            callback.onFinish();
                     }
                 });
-
-                oldData.clear();
-                for (T t : data) {
-                    // 子线程序列化生成新列表
-                    oldData.add(JSON.parseObject(JSON.toJSONString(t), tClass));
-                }
-                canNotRefresh = false;
-
-                // 如果有回调
-                if (callback != null) {
-                    mainHandler.post(new Runnable() {
-                        @Override
-                        public void run() {
-                            callback.onFinish();
-                        }
-                    });
-                }
-            }
-        });
     }
 
     /**
@@ -157,7 +168,7 @@ public abstract class BaseDiffAdapter<T extends BaseDiffBean, V extends Recycler
      * @param t
      */
     public void addData(int index, T t) {
-        if (t != null) {
+        if (t != null && index >= 0 && index < data.size()) {
             List<T> temp = new ArrayList<>(data);
             temp.add(index, t);
             setData(temp);
@@ -183,9 +194,11 @@ public abstract class BaseDiffAdapter<T extends BaseDiffBean, V extends Recycler
      * @param position
      */
     public void removeData(int position) {
-        List<T> temp = new ArrayList<>(data);
-        temp.remove(position);
-        setData(temp);
+        if (position >= 0 && position < data.size()) {
+            List<T> temp = new ArrayList<>(data);
+            temp.remove(position);
+            setData(temp);
+        }
     }
 
     /**
@@ -221,9 +234,7 @@ public abstract class BaseDiffAdapter<T extends BaseDiffBean, V extends Recycler
      * 清除
      */
     public void clearData() {
-        List<T> temp = new ArrayList<>(data);
-        temp.clear();
-        setData(temp);
+        setData(new ArrayList<T>());
     }
 
     /**
