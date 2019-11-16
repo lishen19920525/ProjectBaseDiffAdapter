@@ -18,24 +18,28 @@ import com.example.basediffadapter.BaseDiffAdapter;
  */
 public class DemoAdapter extends BaseDiffAdapter<DemoBean, DemoAdapter.ViewHolder> {
 
+    private Activity activity;
+
     public DemoAdapter(Activity activity, Class<DemoBean> demoBeanClass) {
-        super(activity, demoBeanClass);
-        setHasStableIds(true);
+        super(demoBeanClass);
+        this.activity = activity;
     }
 
     @Override
-    public void bindViewAndData(final ViewHolder holder, int position) {
+    public ViewHolder onCreateViewHolder(ViewGroup parent, int viewType) {
+        return new ViewHolder(activity.getLayoutInflater().inflate(R.layout.item_demo, null));
+    }
+
+    @Override
+    public void bindViewAndData(ViewHolder holder, int position, DemoBean data) {
         Log.i("BaseDiffAdapter", "bindViewAndData: " + position);
         // 正常数据绑定
-        DemoBean data = getItemData(position);
-
         // 配合 setHasStableIds getItemId 防止 图片闪烁
         Integer cache = (Integer) holder.ivItemDemo.getTag(R.id.ivItemDemo);
         if (cache == null || cache != data.icon) {
             holder.ivItemDemo.setImageResource(data.icon);
             holder.ivItemDemo.setTag(R.id.ivItemDemo, data.icon);
         }
-
         holder.tvItemDemo.setText(data.content);
         holder.tvItemDemoId.setText("ID: " + data.id);
         holder.ivItemDemoDelete.setOnClickListener(new View.OnClickListener() {
@@ -48,7 +52,7 @@ public class DemoAdapter extends BaseDiffAdapter<DemoBean, DemoAdapter.ViewHolde
     }
 
     @Override
-    public void partBindViewAndData(ViewHolder holder, int position, DemoBean newBean) {
+    public void bindPartViewAndData(ViewHolder holder, int position, DemoBean newBean) {
         Log.d("BaseDiffAdapter", "partBindViewAndData: " + position);
         // 局部数据刷新 业务中可能不会每个界面元素都会刷新
         Integer cache = (Integer) holder.ivItemDemo.getTag(R.id.ivItemDemo);
@@ -57,16 +61,6 @@ public class DemoAdapter extends BaseDiffAdapter<DemoBean, DemoAdapter.ViewHolde
             holder.ivItemDemo.setTag(R.id.ivItemDemo, newBean.icon);
         }
         holder.tvItemDemo.setText(newBean.content);
-    }
-
-    @Override
-    public ViewHolder onCreateViewHolder(ViewGroup parent, int viewType) {
-        return new ViewHolder(inflater(R.layout.item_demo));
-    }
-
-    @Override
-    public long getItemId(int position) {
-        return getItemData(position).id;
     }
 
     class ViewHolder extends RecyclerView.ViewHolder {

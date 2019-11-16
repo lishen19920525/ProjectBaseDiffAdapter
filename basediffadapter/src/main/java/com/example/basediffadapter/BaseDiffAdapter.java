@@ -1,25 +1,17 @@
 package com.example.basediffadapter;
 
-import android.app.Activity;
-import android.support.annotation.LayoutRes;
-import android.support.annotation.MainThread;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 import android.support.v7.util.DiffUtil;
 import android.support.v7.widget.RecyclerView;
-import android.view.View;
-import android.view.ViewGroup;
+import android.util.Log;
 
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
-
-import io.reactivex.Observable;
-import io.reactivex.ObservableEmitter;
-import io.reactivex.ObservableOnSubscribe;
-import io.reactivex.Observer;
-import io.reactivex.android.schedulers.AndroidSchedulers;
-import io.reactivex.disposables.Disposable;
-import io.reactivex.schedulers.Schedulers;
+import java.util.Random;
+import java.util.Set;
 
 
 /**
@@ -30,20 +22,16 @@ import io.reactivex.schedulers.Schedulers;
  * Author: LiShen
  * Time: 2018/9/11 15:16
  */
-public abstract class BaseDiffAdapter<T extends BaseDiffBean, V extends RecyclerView.ViewHolder> extends RecyclerView.Adapter<V> {
-    private Activity activity;
+public abstract class BaseDiffAdapter<T extends IBaseDiff, V extends RecyclerView.ViewHolder> extends BaseAdapter<T, V> {
+
     private Class<T> tClass;
 
-    private ArrayList<T> oldData = new ArrayList<>();// 用于新旧对比的旧数据
-    private ArrayList<T> data = new ArrayList<>();// 当前数据
+    private List<T> oldData = new ArrayList<>();// 用于新旧对比的旧数据
+    private List<T> realData = new ArrayList<>();// 当前数据;
 
-    private OnItemClickListener<T> onItemClickListener;
-
-    private final Object LOCK = new Object();
-
-    public BaseDiffAdapter(Activity activity, Class<T> tClass) {
-        this.activity = activity;
+    public BaseDiffAdapter(Class<T> tClass) {
         this.tClass = tClass;
+        setHasStableIds(true);
     }
 
     /**
@@ -52,7 +40,7 @@ public abstract class BaseDiffAdapter<T extends BaseDiffBean, V extends Recycler
      * @param holder
      * @param position
      */
-    public abstract void bindViewAndData(V holder, int position);
+    public abstract void bindViewAndData(V holder, int position, T data);
 
     /**
      * 局部数据绑定
@@ -61,155 +49,123 @@ public abstract class BaseDiffAdapter<T extends BaseDiffBean, V extends Recycler
      * @param position
      * @param newData
      */
-    public abstract void partBindViewAndData(V holder, int position, T newData);
-
-    @Override
-    public abstract V onCreateViewHolder(ViewGroup parent, int viewType);
+    public abstract void bindPartViewAndData(V holder, int position, T newData);
 
     @Override
     public final void onBindViewHolder(V holder, int position) {
-        bindViewAndData(holder, position);
+
     }
 
     @Override
     public final void onBindViewHolder(@NonNull V holder, int position, @NonNull List<Object> payloads) {
         if (payloads.isEmpty()) {
-            onBindViewHolder(holder, position);
+            Log.i("BaseDiff", getClass().getSimpleName() + " bindViewAndData: " + position);
+            bindViewAndData(holder, position, getItemData(position));
         } else {
-            partBindViewAndData(holder, position, (T) payloads.get(0));
+            Log.d("BaseDiff", getClass().getSimpleName() + " bindPartViewAndData: " + position);
+            bindPartViewAndData(holder, position, (T) payloads.get(0));
         }
     }
 
     @Override
     public int getItemCount() {
-        return data.size();
+        return realData.size();
     }
 
-    public void setData(List<T> outData) {
-        setData(outData, null);
+    @Override
+    public final long getItemId(int position) {
+        T t = getItemData(position);
+        if (t == null) {
+            return new Random().nextLong(); // 这个不可能出现
+        } else {
+            String id = t.diffId();
+            return (id + "BaseDiffAdapter" + id.length()).hashCode();
+        }
+    }
+
+    @Override
+    public void replaceData(int index, T t) {
+        if (t != null && index >= 0 && index < realData.size()) {
+            realData.set(index, t);
+            notifyDataUpdated();
+        }
     }
 
     /**
      * 更新数据 核心方法
      *
-     * @param outData
+     * @param data
      * @param callback
      */
-    @MainThread
-    public void setData(final List<T> outData, final OnSetDataFinishCallback callback) {
-        Observable
-                .create(new ObservableOnSubscribe<DiffUtil.DiffResult>() {
-                    @Override
-                    public void subscribe(ObservableEmitter<DiffUtil.DiffResult> emitter) throws Exception {
-                        synchronized (LOCK) {
-                            data.clear();
-                            if (outData != null)
-                                data.addAll(outData);
-                            // 子线程计算差异
-                            DiffUtil.DiffResult result = DiffUtil.calculateDiff(
-                                    new BaseDiffCallback(
-                                            new ArrayList<>(oldData),
-                                            new ArrayList<>(data)));
-                            emitter.onNext(result);
-                            // 序列化生成旧list
-                            oldData.clear();
-                            List<T> oldTemp = JSON.parseList(JSON.toJSONString(data), tClass);
-                            if (oldTemp != null)
-                                oldData.addAll(oldTemp);
-                            emitter.onComplete();
-                        }
-                    }
-                })
-                .subscribeOn(Schedulers.io())
-                .observeOn(AndroidSchedulers.mainThread())
-                .subscribe(new Observer<DiffUtil.DiffResult>() {
-                    @Override
-                    public void onSubscribe(Disposable d) {
-
-                    }
-
-                    @Override
-                    public void onNext(DiffUtil.DiffResult diffResult) {
-                        if (diffResult != null)
-                            // dispatch 到 adapter 进行界面刷新
-                            diffResult.dispatchUpdatesTo(BaseDiffAdapter.this);
-                    }
-
-                    @Override
-                    public void onError(Throwable e) {
-
-                    }
-
-                    @Override
-                    public void onComplete() {
-                        if (callback != null)
-                            callback.onFinish();
-                    }
-                });
+    public void setData(List<T> data, OnCompleteCallback callback) {
+        // FIXME 对比出现了问题 暂时用主线程做
+        long start = System.currentTimeMillis();
+        // 因为 setHasStableIds 需要过滤重复元素
+        List<T> outData = filterRepeatItems(data);
+        DiffUtil.DiffResult result = DiffUtil.calculateDiff(new BaseDiffCallback(oldData, new ArrayList<>(outData)));
+        result.dispatchUpdatesTo(this);
+        List<T> oldTemp = JSON.parseList(JSON.toJSONString(outData), tClass);
+        oldData.clear();
+        if (oldTemp != null)
+            oldData.addAll(oldTemp);
+        realData.clear();
+        realData.addAll(outData);
+        if (callback != null)
+            callback.onComplete();
+        long cost = System.currentTimeMillis() - start;
+        Log.w("BaseDiff", getClass().getSimpleName() + " 本次Diff对比耗时 = " + cost + " ms");
     }
 
-    /**
-     * 加数据
-     *
-     * @param t
-     */
-    public void addData(T t) {
-        if (t != null) {
-            List<T> temp = new ArrayList<>(data);
-            temp.add(t);
-            setData(temp);
-        }
+    @Override
+    public void setData(List<T> outData) {
+        setData(outData, null);
     }
 
-    /**
-     * 加数据
-     *
-     * @param index
-     * @param t
-     */
-    public void addData(int index, T t) {
-        if (t != null && index >= 0 && index < data.size()) {
-            List<T> temp = new ArrayList<>(data);
-            temp.add(index, t);
-            setData(temp);
-        }
+    @Override
+    public void addData(T... t) {
+        addData(Arrays.asList(t));
     }
 
-    /**
-     * 加一批数据
-     *
-     * @param list
-     */
+    @Override
+    public void addData(int index, T... t) {
+        addData(index, Arrays.asList(t));
+    }
+
+    @Override
     public void addData(List<T> list) {
         if (list != null) {
-            List<T> temp = new ArrayList<>(data);
+            List<T> temp = new ArrayList<>(realData);
             temp.addAll(list);
             setData(temp);
         }
     }
 
-    /**
-     * 删数据
-     *
-     * @param position
-     */
+    @Override
+    public void addData(int index, List<T> list) {
+        if (list != null) {
+            List<T> temp = new ArrayList<>(realData);
+            if (temp.size() == 0 && index == 0) {
+                temp.addAll(list);
+            } else {
+                temp.addAll(index, list);
+            }
+            setData(temp);
+        }
+    }
+
+    @Override
     public void removeData(int position) {
-        if (position >= 0 && position < data.size()) {
-            List<T> temp = new ArrayList<>(data);
+        if (position >= 0 && position < realData.size()) {
+            List<T> temp = new ArrayList<>(realData);
             temp.remove(position);
             setData(temp);
         }
     }
 
-    /**
-     * 删数据
-     *
-     * @param id
-     */
     public void removeData(String id) {
         int flag = -1;
-        for (int i = 0; i < data.size(); i++) {
-            if (data.get(i).getDiffId().equals(id)) {
+        for (int i = 0; i < realData.size(); i++) {
+            if (realData.get(i).diffId().equals(id)) {
                 flag = i;
                 break;
             }
@@ -219,74 +175,65 @@ public abstract class BaseDiffAdapter<T extends BaseDiffBean, V extends Recycler
         }
     }
 
-    /**
-     * 删数据
-     *
-     * @param t
-     */
-    public void removeData(T t) {
-        List<T> temp = new ArrayList<>(data);
-        temp.remove(t);
-        setData(temp);
+    @Override
+    public void removeData(T... t) {
+        removeData(Arrays.asList(t));
     }
 
-    /**
-     * 清除
-     */
+    @Override
+    public void removeData(List<T> list) {
+        if (list != null) {
+            List<T> temp = new ArrayList<>(realData);
+            temp.removeAll(list);
+            setData(temp);
+        }
+    }
+
+    @Override
     public void clearData() {
-        setData(new ArrayList<T>());
+        setData(new ArrayList<>());
     }
 
-    /**
-     * 修改完 {@link #data} 之后 调用此方法
-     */
+    @Override
     public void notifyDataUpdated() {
-        setData(new ArrayList<>(getData()));
+        setData(new ArrayList<>(realData));
     }
 
+    @Override
     public List<T> getData() {
-        return data;
+        return realData;
     }
 
-    public T getItemData(int position) {
-        return data.get(position);
-    }
-
-
-    public View inflater(@LayoutRes int layoutId) {
-        return getActivity().getLayoutInflater().inflate(layoutId, null);
-    }
-
-    public Activity getActivity() {
-        return activity;
+    @Nullable
+    @Override
+    public T getItemData(int index) {
+        if (index >= 0 && index < realData.size()) {
+            return realData.get(index);
+        } else {
+            return null;
+        }
     }
 
     /**
-     * Item被点击了
+     * 去除重复元素
      *
-     * @param holder
+     * @param data
      * @return
      */
-    public int onViewHolderItemClick(RecyclerView.ViewHolder holder) {
-        int position = holder.getLayoutPosition();
-        if (position >= 0 && position < getData().size()) {
-            if (getOnItemClickListener() != null) {
-                getOnItemClickListener().onItemClick(position, getItemData(position));
+    private List<T> filterRepeatItems(List<T> data) {
+        List<T> outData = new ArrayList<>(data != null ? data : new ArrayList<>());
+
+        Set<String> notRepeat = new HashSet<>();
+        List<T> repeatItems = new ArrayList<>();
+        for (T t : outData) {
+            if (notRepeat.contains(t.diffId())) {
+                repeatItems.add(t);
+            } else {
+                notRepeat.add(t.diffId());
             }
         }
-        return position;
-    }
-
-    public interface OnItemClickListener<T> {
-        void onItemClick(int position, T t);
-    }
-
-    public void setOnItemClickListener(OnItemClickListener<T> onItemClickListener) {
-        this.onItemClickListener = onItemClickListener;
-    }
-
-    public OnItemClickListener<T> getOnItemClickListener() {
-        return onItemClickListener;
+        outData.removeAll(repeatItems);
+        return outData;
     }
 
     private class BaseDiffCallback extends DiffUtil.Callback {
@@ -310,14 +257,12 @@ public abstract class BaseDiffAdapter<T extends BaseDiffBean, V extends Recycler
 
         @Override
         public boolean areItemsTheSame(int oldItemPosition, int newItemPosition) {
-            return oldList.get(oldItemPosition).getDiffId().equals(
-                    newList.get(newItemPosition).getDiffId());
+            return oldList.get(oldItemPosition).diffId().equals(newList.get(newItemPosition).diffId());
         }
 
         @Override
         public boolean areContentsTheSame(int oldItemPosition, int newItemPosition) {
-            return oldList.get(oldItemPosition).getDiffContent().equals(
-                    newList.get(newItemPosition).getDiffContent());
+            return oldList.get(oldItemPosition).diffContent().equals(newList.get(newItemPosition).diffContent());
         }
 
         @Nullable
@@ -331,7 +276,7 @@ public abstract class BaseDiffAdapter<T extends BaseDiffBean, V extends Recycler
         }
     }
 
-    public interface OnSetDataFinishCallback {
-        void onFinish();
+    public interface OnCompleteCallback {
+        void onComplete();
     }
 }
