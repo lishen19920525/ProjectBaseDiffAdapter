@@ -18,7 +18,7 @@ public abstract class BaseAdapter<T, V extends RecyclerView.ViewHolder> extends 
     private OnItemClickListener<T> onItemClickListener;
 
     public BaseAdapter() {
-
+        setHasStableIds(true);
     }
 
     @Override
